@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yolo26-gui"
+version = "0.1.0"
+description = "GUI project for traffic sign detection based on YOLO26."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "yolo26-gui contributors" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+yolo26-gui = "yolo26_gui.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yolo26_gui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
