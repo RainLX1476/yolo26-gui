@@ -2,21 +2,27 @@
 
 26 暑期学校实习成果：基于 YOLO26 的交通标识检测 GUI 项目。
 
-这个仓库目前采用“轻量工程化”结构，适合在 Windows 上以脚本方式直接运行，同时保留后续扩展成较完整项目的空间。
+这个仓库目前采用“脚本优先”的轻量结构，适合在 Windows 上直接运行主程序和工具脚本。
 
 ## 目录结构
 
 ```text
 yolo26-gui/
-├─ src/
-│  └─ yolo26_gui/
-│     ├─ __init__.py
-│     ├─ __main__.py
-│     └─ app.py
+├─ gui/
+│  ├─ __init__.py
+│  └─ main_window.py
+├─ scripts/
+│  ├─ model_convert.py
+│  └─ predict.py
+├─ test_scripts/
+│  └─ run_predict_visualize.py
 ├─ tests/
 │  └─ test_app.py
+├─ main.py
 ├─ .gitignore
-├─ pyproject.toml
+├─ requirements.txt
+├─ requirements-dev.txt
+├─ pytest.ini
 └─ README.md
 ```
 
@@ -25,13 +31,15 @@ yolo26-gui/
 推荐使用 Python `3.10+`。
 
 ```powershell
-py -m yolo26_gui
+py main.py
 ```
 
-如果你希望按包方式导入，建议先安装当前项目：
+如果你希望先安装依赖，再运行主程序：
 
 ```powershell
-py -m pip install -e .
+py -m pip install --upgrade pip
+py -m pip install -r requirements.txt
+py main.py
 ```
 
 ## 依赖安装
@@ -44,6 +52,7 @@ py -m pip install -e .
 - `onnxruntime-directml`
 - `opencv-python`
 - `numpy`
+- `PySide6`
 
 其中：
 
@@ -53,17 +62,17 @@ py -m pip install -e .
 
 ### 安装命令
 
-推荐先升级 `pip`，再安装当前项目：
+推荐先升级 `pip`，再安装运行依赖：
 
 ```powershell
 py -m pip install --upgrade pip
-py -m pip install -e .
+py -m pip install -r requirements.txt
 ```
 
-如果只想单独安装脚本所需依赖，也可以直接执行：
+如果还需要运行测试：
 
 ```powershell
-py -m pip install ultralytics onnxruntime-directml opencv-python numpy
+py -m pip install -r requirements-dev.txt
 ```
 
 ## 脚本说明
@@ -107,18 +116,12 @@ py scripts/predict.py --onnx best.onnx --image test.jpg
 可选参数示例：
 
 ```powershell
-py scripts/predict.py --onnx best.onnx --image test.jpg --conf 0.25 --iou 0.45
-```
-
-如果导出的模型输出中包含 `objectness`，可以增加：
-
-```powershell
-py scripts/predict.py --onnx best.onnx --image test.jpg --with-objectness
+py scripts/predict.py --onnx best.onnx --image test.jpg --conf 0.25
 ```
 
 ## 开发建议
 
-- 把实际 GUI 入口逻辑补到 `src/yolo26_gui/app.py`
-- 如果后续接入模型，可新增 `src/yolo26_gui/inference/`
+- GUI 主入口统一从 `main.py` 启动
+- 如果后续接入模型，可新增顶层 `core/`、`gui/pages/` 等普通模块目录
 - 如果后续需要打包成 `exe`，再补充 PyInstaller 配置即可
 - `tests/` 先保留最小结构，后续加功能时可以同步补测试
