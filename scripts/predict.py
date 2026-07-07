@@ -11,12 +11,25 @@ import onnxruntime as ort
 __all__ = ["predict_image"]
 
 
+def _get_runtime_providers() -> list[str]:
+	"""根据当前运行环境返回可用的推理后端列表。"""
+	available_providers = set(ort.get_available_providers())
+	preferred_providers = [
+		"DmlExecutionProvider",
+		"CUDAExecutionProvider",
+		"CPUExecutionProvider",
+	]
+	return [
+		provider for provider in preferred_providers if provider in available_providers
+	] or ["CPUExecutionProvider"]
+
+
 def _load_onnx_model(model_path: str | Path) -> ort.InferenceSession:
 	"""加载 ONNX 模型，返回可直接复用的模型句柄。"""
 	model_file = Path(model_path).expanduser().resolve()
 	return ort.InferenceSession(
 		str(model_file),
-		providers=["DmlExecutionProvider", "CPUExecutionProvider"],
+		providers=_get_runtime_providers(),
 	)
 
 
@@ -205,7 +218,7 @@ def predict_image(
 
 def parse_args() -> argparse.Namespace:
 	"""解析命令行参数。"""
-	parser = argparse.ArgumentParser(description="使用 ONNX Runtime DirectML 后端执行单张图像检测")
+	parser = argparse.ArgumentParser(description="使用 ONNX Runtime 执行单张图像检测")
 	parser.add_argument("--onnx", required=True, help="输入的 ONNX 模型路径")
 	parser.add_argument("--image", required=True, help="待检测图像路径")
 	parser.add_argument("--conf", type=float, default=0.25, help="置信度阈值，默认 0.25")
