@@ -11,7 +11,12 @@ requires-python = ">=3.10"
 authors = [
   { name = "yolo26-gui contributors" }
 ]
-dependencies = []
+dependencies = [
+  "numpy>=1.26",
+  "opencv-python>=4.10",
+  "onnxruntime-directml>=1.18",
+  "ultralytics>=8.3",
+]
 
 [project.optional-dependencies]
 dev = [
