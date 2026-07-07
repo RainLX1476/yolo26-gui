@@ -5,6 +5,8 @@ from pathlib import Path
 
 from ultralytics import YOLO
 
+__all__ = ["convert_pt_to_onnx"]
+
 
 def convert_pt_to_onnx(
 	pt_path: str | Path,
@@ -52,7 +54,7 @@ def convert_pt_to_onnx(
 	return exported_path
 
 
-def parse_args() -> argparse.Namespace:
+def _parse_args() -> argparse.Namespace:
 	"""解析命令行参数。"""
 	parser = argparse.ArgumentParser(description="将 YOLO 的 .pt 模型转换为 .onnx 模型")
 	parser.add_argument("--pt", required=True, help="输入的 .pt 模型路径")
@@ -71,7 +73,7 @@ def parse_args() -> argparse.Namespace:
 	return parser.parse_args()
 
 
-def normalize_imgsz(imgsz: list[int]) -> int | tuple[int, int]:
+def _normalize_imgsz(imgsz: list[int]) -> int | tuple[int, int]:
 	"""将命令行传入的尺寸参数整理为导出函数所需格式。"""
 	if len(imgsz) == 1:
 		return imgsz[0]
@@ -82,11 +84,11 @@ def normalize_imgsz(imgsz: list[int]) -> int | tuple[int, int]:
 
 def main() -> None:
 	"""命令行入口。"""
-	args = parse_args()
+	args = _parse_args()
 	output_path = convert_pt_to_onnx(
 		pt_path=args.pt,
 		onnx_path=args.onnx,
-		imgsz=normalize_imgsz(args.imgsz),
+		imgsz=_normalize_imgsz(args.imgsz),
 		opset=args.opset,
 		dynamic=args.dynamic,
 		simplify=args.simplify,
