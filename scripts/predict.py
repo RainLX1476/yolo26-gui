@@ -100,16 +100,6 @@ def _normalize_predictions(output: np.ndarray) -> np.ndarray:
 	return predictions
 
 
-def _xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
-	"""将中心点宽高框转换为左上右下框。"""
-	converted = boxes.copy()
-	converted[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
-	converted[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
-	converted[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
-	converted[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
-	return converted
-
-
 def _scale_boxes(
 	boxes: np.ndarray,
 	image_shape: tuple[int, int],
@@ -128,61 +118,15 @@ def _scale_boxes(
 	return scaled_boxes
 
 
-def _compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
-	"""计算一个框与多个框的 IoU。"""
-	x1 = np.maximum(box[0], boxes[:, 0])
-	y1 = np.maximum(box[1], boxes[:, 1])
-	x2 = np.minimum(box[2], boxes[:, 2])
-	y2 = np.minimum(box[3], boxes[:, 3])
-
-	inter_width = np.maximum(0.0, x2 - x1)
-	inter_height = np.maximum(0.0, y2 - y1)
-	intersection = inter_width * inter_height
-
-	box_area = np.maximum(0.0, box[2] - box[0]) * np.maximum(0.0, box[3] - box[1])
-	boxes_area = np.maximum(0.0, boxes[:, 2] - boxes[:, 0]) * np.maximum(0.0, boxes[:, 3] - boxes[:, 1])
-	union = box_area + boxes_area - intersection
-	return np.divide(intersection, union, out=np.zeros_like(intersection), where=union > 0)
-
-
-def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> list[int]:
-	"""执行非极大值抑制。"""
-	order = scores.argsort()[::-1]
-	keep: list[int] = []
-
-	while order.size > 0:
-		current = int(order[0])
-		keep.append(current)
-		if order.size == 1:
-			break
-
-		ious = _compute_iou(boxes[current], boxes[order[1:]])
-		remaining = np.where(ious < iou_threshold)[0]
-		order = order[remaining + 1]
-
-	return keep
-
-
-def _extract_scores(
-	predictions: np.ndarray,
-	with_objectness: bool,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-	"""从预测结果中提取框、类别和置信度。"""
+def _extract_detections(predictions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+	"""从预测结果中提取检测框、置信度和类别编号。"""
 	if predictions.shape[1] < 6:
 		raise ValueError(f"输出属性维度不足，无法解析检测结果: {predictions.shape}")
 
-	boxes_xywh = predictions[:, :4]
-	if with_objectness:
-		objectness = predictions[:, 4]
-		class_scores = predictions[:, 5:]
-		class_ids = np.argmax(class_scores, axis=1)
-		confidences = objectness * class_scores[np.arange(class_scores.shape[0]), class_ids]
-	else:
-		class_scores = predictions[:, 4:]
-		class_ids = np.argmax(class_scores, axis=1)
-		confidences = class_scores[np.arange(class_scores.shape[0]), class_ids]
-
-	return boxes_xywh, class_ids, confidences
+	boxes_xyxy = predictions[:, :4]
+	confidences = predictions[:, 4]
+	class_ids = predictions[:, 5].astype(np.int32)
+	return boxes_xyxy, confidences, class_ids
 
 
 def _parse_detections(
@@ -191,47 +135,36 @@ def _parse_detections(
 	scale: float,
 	pad: tuple[float, float],
 	conf_threshold: float,
-	iou_threshold: float,
-	with_objectness: bool,
 ) -> list[dict[str, object]]:
 	"""将模型原始输出解析为最终检测结果列表。
 
 	后续如果需要适配新的模型输出格式，优先修改这个函数。
 	"""
 	predictions = _normalize_predictions(output)
-	boxes_xywh, class_ids, confidences = _extract_scores(predictions, with_objectness)
+	boxes_xyxy, confidences, class_ids = _extract_detections(predictions)
 	valid_mask = confidences >= conf_threshold
 	if not np.any(valid_mask):
 		return []
 
-	boxes_xywh = boxes_xywh[valid_mask]
-	class_ids = class_ids[valid_mask]
+	boxes_xyxy = boxes_xyxy[valid_mask]
 	confidences = confidences[valid_mask]
-
-	boxes_xyxy = _xywh_to_xyxy(boxes_xywh)
+	class_ids = class_ids[valid_mask]
 	boxes_xyxy = _scale_boxes(boxes_xyxy, image_shape, scale, pad)
 
 	results: list[dict[str, object]] = []
-	for class_id in np.unique(class_ids):
-		class_mask = class_ids == class_id
-		class_boxes = boxes_xyxy[class_mask]
-		class_scores = confidences[class_mask]
-		keep_indices = _nms(class_boxes, class_scores, iou_threshold)
-
-		for keep_index in keep_indices:
-			box = class_boxes[keep_index]
-			results.append(
-				{
-					"class_id": int(class_id),
-					"confidence": float(class_scores[keep_index]),
-					"box": [
-						float(box[0]),
-						float(box[1]),
-						float(box[2]),
-						float(box[3]),
-					],
-				}
-			)
+	for box, confidence, class_id in zip(boxes_xyxy, confidences, class_ids, strict=False):
+		results.append(
+			{
+				"class_id": int(class_id),
+				"confidence": float(confidence),
+				"box": [
+					float(box[0]),
+					float(box[1]),
+					float(box[2]),
+					float(box[3]),
+				],
+			}
+		)
 
 	results.sort(key=lambda item: float(item["confidence"]), reverse=True)
 	return results
@@ -241,8 +174,6 @@ def predict_image(
 	model: ort.InferenceSession,
 	image: str | Path | np.ndarray,
 	conf_threshold: float = 0.25,
-	iou_threshold: float = 0.45,
-	with_objectness: bool = False,
 ) -> list[dict[str, object]]:
 	"""传入模型句柄和图像，返回检测结果列表。
 
@@ -250,8 +181,6 @@ def predict_image(
 		model: 已加载好的 ONNX Runtime 模型句柄。
 		image: 待检测图像，可以是图像路径，也可以是已读取的 `numpy.ndarray`。
 		conf_threshold: 置信度阈值，低于该值的候选结果会被过滤。
-		iou_threshold: 非极大值抑制的 IoU 阈值，用于去除重复检测框。
-		with_objectness: 是否按包含 objectness 的输出格式解析模型结果。
 
 	返回:
 		检测结果列表。每个元素为一个字典，包含以下字段：
@@ -271,8 +200,6 @@ def predict_image(
 		scale=scale,
 		pad=pad,
 		conf_threshold=conf_threshold,
-		iou_threshold=iou_threshold,
-		with_objectness=with_objectness,
 	)
 
 
@@ -282,8 +209,6 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--onnx", required=True, help="输入的 ONNX 模型路径")
 	parser.add_argument("--image", required=True, help="待检测图像路径")
 	parser.add_argument("--conf", type=float, default=0.25, help="置信度阈值，默认 0.25")
-	parser.add_argument("--iou", type=float, default=0.45, help="NMS 的 IoU 阈值，默认 0.45")
-	parser.add_argument("--with-objectness", action="store_true", help="按带 objectness 的输出格式解析")
 	return parser.parse_args()
 
 
@@ -295,8 +220,6 @@ def main() -> None:
 		model=model,
 		image=args.image,
 		conf_threshold=args.conf,
-		iou_threshold=args.iou,
-		with_objectness=args.with_objectness,
 	)
 	print(json.dumps(results, ensure_ascii=False, indent=2))
 
