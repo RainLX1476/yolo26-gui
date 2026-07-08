@@ -15,7 +15,8 @@ yolo26-gui/
 │  ├─ model_convert.py
 │  ├─ predict.py
 │  ├─ check_dataset.py
-│  └─ evaluate_dataset.py
+│  ├─ evaluate_dataset.py
+│  └─ predict_video.py
 ├─ test_scripts/
 │  └─ run_predict_visualize.py
 ├─ tests/
@@ -46,7 +47,7 @@ py main.py
 
 ## 依赖安装
 
-当前项目中的四个脚本统一使用 `pip` 安装依赖。
+当前项目中的五个脚本统一使用 `pip` 安装依赖。
 
 ### 核心依赖
 
@@ -62,6 +63,7 @@ py main.py
 - `predict.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
 - `check_dataset.py` 依赖 `opencv-python`、`numpy`
 - `evaluate_dataset.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
+- `predict_video.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
 - `onnxruntime-directml` 安装后，代码中的导入名仍然是 `onnxruntime`
 
 ### 安装命令
@@ -237,6 +239,56 @@ py scripts/evaluate_dataset.py --onnx best.onnx --input evaluate/input --output 
 - `evaluate/output/records/per_image_results.json`
 - `evaluate/output/visualizations/`：所有图像的可视化结果
 - `evaluate/output/errors/`：存在误检或漏检的图像可视化结果
+
+### 5. `scripts/predict_video.py`
+
+作用：
+
+- 对一段交通标志牌视频执行逐帧检测
+- 将检测框、类别名称、置信度绘制到视频帧上
+- 在显示窗口中实时叠加 FPS
+- 导出带检测结果的输出视频
+
+核心函数：
+
+- `iter_video_predictions(model, video_path, conf_threshold=0.25, classes_path=None)`
+- `predict_video(model_path, video_path="evaluate/input_video", output_path="evaluate/output_video", conf_threshold=0.25, classes_path=None, show=True)`
+- `render_detections(frame, detections, class_names=None, fps=None)`
+
+说明：
+
+- CLI 模式下可直接读取一个视频并保存结果
+- 函数层已经拆成“逐帧结果生成 + 渲染”两层，后续 GUI 页面可以直接复用 `iter_video_predictions(...)` 获取每一帧的原图、检测结果、渲染结果和 FPS
+- 另外提供 `VideoPredictionSession`，支持 `seek_frame(...)` 和 `seek_time(...)`，便于后续 GUI 实现播放进度条拖动和跳转
+
+命令行用法：
+
+```powershell
+py scripts/predict_video.py --onnx temp/yolo26n.onnx
+```
+
+常用可选参数：
+
+- `--input evaluate/input_video`：输入视频路径，或包含单个视频的目录
+- `--output evaluate/output_video`：输出视频路径，或输出目录
+- `--classes evaluate/input/classes.txt`：可选类别名文件
+- `--conf 0.25`：置信度阈值
+- `--no-show`：只保存输出视频，不弹实时显示窗口
+
+示例：
+
+```powershell
+py scripts/predict_video.py --onnx temp/yolo26n.onnx --input evaluate/input_video/demo.mp4 --output evaluate/output_video --conf 0.25
+```
+
+命令行输出：
+
+- 终端打印输入视频、输出视频、分辨率、输入 FPS、总帧数、已处理帧数、平均推理 FPS
+- 默认弹出实时检测窗口，按 `q` 或 `Esc` 可提前结束
+
+输出文件：
+
+- 默认输出到 `evaluate/output_video/<输入视频名>_pred.mp4`
 
 ## 开发建议
 
