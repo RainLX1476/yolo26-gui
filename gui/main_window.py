@@ -14,6 +14,7 @@ from PySide6.QtGui import QAction, QImage, QPixmap
 from PySide6.QtWidgets import (
 	QApplication,
 	QCheckBox,
+	QDialog,
 	QDoubleSpinBox,
 	QFileDialog,
 	QFormLayout,
@@ -238,6 +239,27 @@ def _draw_labeled_box(
 	)
 
 
+class HistogramDialog(QDialog):
+	"""展示数据集检查直方图的弹窗。"""
+
+	def __init__(self, title: str, image_path: str | Path, parent: QWidget | None = None) -> None:
+		super().__init__(parent)
+		self.setWindowTitle(title)
+		self.resize(960, 720)
+
+		layout = QVBoxLayout(self)
+		layout.setContentsMargins(10, 10, 10, 10)
+
+		self.preview_label = ImagePreviewLabel("直方图加载失败")
+		layout.addWidget(self.preview_label, 1)
+
+		pixmap = QPixmap(str(image_path))
+		if pixmap.isNull():
+			self.preview_label.clear_preview(f"无法加载直方图:\n{image_path}")
+		else:
+			self.preview_label.set_preview_pixmap(pixmap)
+
+
 def _create_zoom_controls(target_label: ImagePreviewLabel) -> QWidget:
 	container = QWidget()
 	layout = QHBoxLayout(container)
@@ -301,6 +323,7 @@ class MainWindow(QMainWindow):
 		self.video_metadata: dict[str, Any] | None = None
 		self.video_frame_pending = False
 		self.video_slider_active = False
+		self.histogram_dialogs: list[HistogramDialog] = []
 
 		self._init_backend()
 		self._build_ui()
@@ -1146,7 +1169,23 @@ class MainWindow(QMainWindow):
 			return
 		self.dataset_summary_text.setPlainText(payload.get("report_text", ""))
 		self.dataset_json_text.setPlainText(json.dumps(payload, ensure_ascii=False, indent=2))
+		self._show_dataset_histograms(payload)
 		self.statusBar().showMessage("数据集检查完成", 5000)
+
+	def _show_dataset_histograms(self, payload: dict[str, Any]) -> None:
+		self.histogram_dialogs = []
+		dialog_specs = [
+			("每类图片数量直方图", payload.get("image_histogram_path")),
+			("每类检测框数量直方图", payload.get("box_histogram_path")),
+		]
+		for title, image_path in dialog_specs:
+			if not image_path:
+				continue
+			dialog = HistogramDialog(title, image_path, self)
+			dialog.show()
+			dialog.raise_()
+			dialog.activateWindow()
+			self.histogram_dialogs.append(dialog)
 
 	def _evaluate_dataset(self) -> None:
 		dataset_dir = self.dataset_dir_edit.text().strip()
@@ -1170,35 +1209,71 @@ class MainWindow(QMainWindow):
 			return
 
 		lines = [
-			f"评测图片数量: {payload['image_count']}",
+			f"模型: {payload['model_path']}",
+			f"评测集目录: {payload['input_dir']}",
+			f"输出目录: {payload['output_dir']}",
+			f"图像数量: {payload['image_count']}",
 			f"Precision: {float(payload['precision']):.4f}",
 			f"Recall: {float(payload['recall']):.4f}",
+			f"80% 召回达标: {'是' if payload['recall_reached_80_percent'] else '否'}",
 			f"mAP50: {float(payload['map50']):.4f}",
 			f"误检率: {float(payload['false_detection_rate']):.4f}",
 			f"漏检率: {float(payload['miss_rate']):.4f}",
-			f"80% 召回达标: {'是' if payload['recall_reached_80_percent'] else '否'}",
-			f"正确样本叠加框目录: {Path(payload['output_dir']) / 'visualizations' / 'combined'}",
-			f"正确样本预测框目录: {Path(payload['output_dir']) / 'visualizations' / 'predictions_only'}",
-			f"正确样本基准框目录: {Path(payload['output_dir']) / 'visualizations' / 'ground_truths_only'}",
-			f"误检样本叠加框目录: {Path(payload['output_dir']) / 'errors' / 'false_positives' / 'combined'}",
-			f"误检样本预测框目录: {Path(payload['output_dir']) / 'errors' / 'false_positives' / 'predictions_only'}",
-			f"误检样本基准框目录: {Path(payload['output_dir']) / 'errors' / 'false_positives' / 'ground_truths_only'}",
-			f"漏检样本叠加框目录: {Path(payload['output_dir']) / 'errors' / 'false_negatives' / 'combined'}",
-			f"漏检样本预测框目录: {Path(payload['output_dir']) / 'errors' / 'false_negatives' / 'predictions_only'}",
-			f"漏检样本基准框目录: {Path(payload['output_dir']) / 'errors' / 'false_negatives' / 'ground_truths_only'}",
-			f"记录目录: {Path(payload['output_dir']) / 'records'}",
 		]
+
+		per_class_metrics = payload.get("per_class_metrics", [])
+		if per_class_metrics:
+			lines.extend(
+				[
+					"",
+					"各类别 AP50:",
+					f"{'Class':<20} {'ID':>4} {'AP50':>8} {'Precision':>10} {'Recall':>8} {'GT':>6} {'Prediction':>10}",
+					"-" * 78,
+				]
+			)
+			for metric in per_class_metrics:
+				lines.append(
+					f"{metric['class_name']:<20.20} "
+					f"{metric['class_id']:>4} "
+					f"{metric['ap50']:>8.4f} "
+					f"{metric['precision']:>10.4f} "
+					f"{metric['recall']:>8.4f} "
+					f"{metric['ground_truth_count']:>6} "
+					f"{metric['prediction_count']:>10}"
+				)
 
 		most_fp = payload.get("most_false_positive_class")
 		most_fn = payload.get("most_false_negative_class")
+		lines.append("")
 		if most_fp:
 			lines.append(
-				f"误检最多类别: {most_fp['class_name']} | 类别ID={most_fp['class_id']} | 误检次数={most_fp['count']}"
+				f"误检最多类别: {most_fp['class_name']} (id={most_fp['class_id']}, count={most_fp['count']})"
 			)
+		else:
+			lines.append("误检最多类别: 无")
 		if most_fn:
 			lines.append(
-				f"漏检最多类别: {most_fn['class_name']} | 类别ID={most_fn['class_id']} | 漏检次数={most_fn['count']}"
+				f"漏检最多类别: {most_fn['class_name']} (id={most_fn['class_id']}, count={most_fn['count']})"
 			)
+		else:
+			lines.append("漏检最多类别: 无")
+
+		lines.extend(
+			[
+				"",
+				"输出路径提示:",
+				f"正确样本叠加框目录: {Path(payload['output_dir']) / 'visualizations' / 'combined'}",
+				f"正确样本预测框目录: {Path(payload['output_dir']) / 'visualizations' / 'predictions_only'}",
+				f"正确样本基准框目录: {Path(payload['output_dir']) / 'visualizations' / 'ground_truths_only'}",
+				f"误检样本叠加框目录: {Path(payload['output_dir']) / 'errors' / 'false_positives' / 'combined'}",
+				f"误检样本预测框目录: {Path(payload['output_dir']) / 'errors' / 'false_positives' / 'predictions_only'}",
+				f"误检样本基准框目录: {Path(payload['output_dir']) / 'errors' / 'false_positives' / 'ground_truths_only'}",
+				f"漏检样本叠加框目录: {Path(payload['output_dir']) / 'errors' / 'false_negatives' / 'combined'}",
+				f"漏检样本预测框目录: {Path(payload['output_dir']) / 'errors' / 'false_negatives' / 'predictions_only'}",
+				f"漏检样本基准框目录: {Path(payload['output_dir']) / 'errors' / 'false_negatives' / 'ground_truths_only'}",
+				f"记录目录: {Path(payload['output_dir']) / 'records'}",
+			]
+		)
 
 		self.dataset_summary_text.setPlainText("\n".join(lines))
 		self.dataset_json_text.setPlainText(json.dumps(payload, ensure_ascii=False, indent=2))
