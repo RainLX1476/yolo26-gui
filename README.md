@@ -9,7 +9,7 @@
 
 
 # 2.环境配置
-1. ***安装nvidia显卡驱动*** 
+1. ***安装nvidia显卡驱动***
 
 首先要在设备管理器中查看你的显卡型号，在这里可以看到显卡型号为RTX 3060。
 ![img_2.png](img_2.png)
@@ -39,7 +39,7 @@ cudnn下载地址：https://developer.nvidia.com/cudnn 。
 
 3. ***安装gpu版torch、torchvision***
 
-安装pytorch： 
+安装pytorch：
 创建环境名为yolo26的虚拟环境:conda create -n yolo26 python=3.10 -y
 
 安装成功后激活yolo26环境： conda activate yolo26
@@ -53,7 +53,7 @@ CPU版本： pip install torch==1.13.1 torchvision==0.14.1 -i https://pypi.tuna.
 
 在yolo26环境中执行：
 import torch
-torch.cuda.is_available() 
+torch.cuda.is_available()
 返回True，说明GPU版本的pytorch安装好了，返回False，说明CPU版本的pytorch安装好了，报错说明没有安装好
 
 4. ***下载YOLO26并安装***
@@ -176,167 +176,13 @@ fliplr: 0.0 # (float) image flip left-right (probability)
 
 # 5.推理方法
 
+# 5.推理方法
 
+本项目当前提供单图推理和视频推理两种方式，均基于 ONNX Runtime 执行。
 
-# 6.评测方法
+## 5.1 单图推理
 
-## yolo26-gui
-
-26 暑期学校实习成果：基于 YOLO26 的交通标识检测 GUI 项目。
-
-这个仓库目前采用“脚本优先”的轻量结构，适合在 Windows 上直接运行主程序和工具脚本。
-
-当前 GUI 已实现三个主功能：
-
-- 单图预测
-- 视频预测
-- 模型评估
-
-## 目录结构
-
-```text
-yolo26-gui/
-├─ evaluate/
-│  ├─ input/
-│  ├─ input_video/
-│  ├─ output/
-│  └─ output_video/
-├─ gui/
-│  ├─ __init__.py
-│  ├─ backend_worker.py
-│  └─ main_window.py
-├─ models/
-├─ scripts/
-│  ├─ model_convert.py
-│  ├─ predict.py
-│  ├─ check_dataset.py
-│  ├─ evaluate_dataset.py
-│  └─ predict_video.py
-├─ temp/
-├─ test_scripts/
-│  └─ run_predict_visualize.py
-├─ tests/
-│  └─ test_app.py
-├─ main.py
-├─ .gitignore
-├─ requirements.txt
-├─ requirements-dev.txt
-├─ pytest.ini
-└─ README.md
-```
-
-## 运行方式
-
-推荐使用 Python `3.10+`。
-
-```powershell
-py main.py
-```
-
-GUI 启动后可直接使用：
-
-- 顶部模型菜单加载 `.onnx` 或 `.pt` 模型
-- 单图预测页选择图片并查看 GT / 预测框
-- 视频预测页加载视频、播放、导出预测视频
-- 模型评估页执行数据集检查和评测
-
-如果你希望先安装依赖，再运行主程序：
-
-```powershell
-py -m pip install --upgrade pip
-py -m pip install -r requirements.txt
-py main.py
-```
-
-## 依赖安装
-
-当前项目中的五个脚本统一使用 `pip` 安装依赖。
-
-### 核心依赖
-
-- `ultralytics`
-- `onnxruntime-directml`
-- `opencv-python`
-- `numpy`
-- `PySide6`
-
-其中：
-
-- `model_convert.py` 依赖 `ultralytics`
-- `predict.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
-- `check_dataset.py` 依赖 `opencv-python`、`numpy`
-- `evaluate_dataset.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
-- `predict_video.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
-- `onnxruntime-directml` 安装后，代码中的导入名仍然是 `onnxruntime`
-- `PySide6` 用于 GUI
-
-### 安装命令
-
-推荐先升级 `pip`，再安装运行依赖：
-
-```powershell
-py -m pip install --upgrade pip
-py -m pip install -r requirements.txt
-```
-
-如果还需要运行测试：
-
-```powershell
-py -m pip install -r requirements-dev.txt
-```
-
-## 脚本说明
-
-### 1. `scripts/model_convert.py`
-
-作用：
-
-- 将 YOLO 的 `.pt` 模型导出为 `.onnx`
-- 适合把训练结果转换成后续 GUI、推理脚本、评测脚本可直接使用的 ONNX 模型
-- 当前实现会先在 `temp/model_convert/` 下生成临时导出文件，再移动到目标位置，避免覆盖现有 `models/*.onnx`
-
-核心函数：
-
-- `convert_pt_to_onnx(pt_path, onnx_path=None, imgsz=640, opset=12, dynamic=False, simplify=False, half=False)`
-
-命令行用法：
-
-```powershell
-py scripts/model_convert.py --pt best.pt --onnx best.onnx
-```
-
-常用可选参数：
-
-- `--imgsz 640`：输入尺寸，传 1 个值表示正方形，传 2 个值表示高和宽
-- `--opset 12`：指定 ONNX opset 版本
-- `--dynamic`：导出动态输入尺寸模型
-- `--simplify`：简化导出的 ONNX 图
-- `--half`：导出为 FP16 精度
-
-示例：
-
-```powershell
-py scripts/model_convert.py --pt best.pt --onnx best.onnx --imgsz 640 --opset 12 --dynamic --simplify
-```
-
-命令行输出：
-
-- 终端打印导出的 ONNX 文件路径
-
-### 2. `scripts/predict.py`
-
-作用：
-
-- 使用 ONNX Runtime 对单张图像执行目标检测
-- 支持传入图像路径，也支持在函数调用时直接传入 `numpy.ndarray`
-
-核心函数：
-
-- `predict_image(model, image, conf_threshold=0.25)`
-
-相关内部函数：
-
-- `_load_onnx_model(model_path)`：加载 ONNX 模型
+单图推理脚本为 `scripts/predict.py`，用于对单张图像执行交通标志检测。
 
 命令行用法：
 
@@ -344,9 +190,11 @@ py scripts/model_convert.py --pt best.pt --onnx best.onnx --imgsz 640 --opset 12
 py scripts/predict.py --onnx best.onnx --image test.jpg
 ```
 
-常用可选参数：
+常用参数：
 
-- `--conf 0.25`：置信度阈值
+- `--onnx`：输入的 ONNX 模型路径
+- `--image`：待检测图像路径
+- `--conf 0.25`：置信度阈值，默认值为 `0.25`
 
 示例：
 
@@ -359,26 +207,55 @@ py scripts/predict.py --onnx best.onnx --image test.jpg --conf 0.25
 - 终端打印 JSON 格式的检测结果列表
 - 每个结果包含 `class_id`、`confidence`、`box`
 
-### 3. `scripts/check_dataset.py`
+## 5.2 视频推理
 
-作用：
+视频推理脚本为 `scripts/predict_video.py`，用于对视频逐帧检测并导出带预测框的结果视频。
 
-- 检查 `evaluate/input` 下的 YOLO 格式评测集是否完整、可用
-- 兼容 `txt` 与 `xml` 标注；若同名 `txt` 不存在，会自动尝试同名 `xml`
-- 统计各类别图片数量、各类别检测框数量、总图片数、总框数、平均每图框数
+命令行用法：
+
+```powershell
+py scripts/predict_video.py --onnx models/best.onnx
+```
+
+常用参数：
+
+- `--input evaluate/input_video`：输入视频路径，或包含单个视频的目录
+- `--output evaluate/output_video`：输出视频路径，或输出目录
+- `--classes evaluate/input/classes.txt`：可选类别名文件
+- `--conf 0.25`：置信度阈值
+- `--no-show`：只保存输出视频，不弹出实时显示窗口
+
+示例：
+
+```powershell
+py scripts/predict_video.py --onnx models/best.onnx --input evaluate/input_video/demo.mp4 --output evaluate/output_video --conf 0.25
+```
+
+命令行输出：
+
+- 终端打印输入视频名称、输出视频名称、分辨率、输入 FPS、总帧数、已处理帧数、平均推理 FPS等信息
+- 默认弹出实时检测窗口，按 `q` 或 `Esc` 可提前结束
+
+输出文件：
+
+- 默认输出到 `evaluate/output_video/<输入视频名>_pred.mp4`
+
+# 6.评测方法
+
+本项目提供“评测集检查”和“模型评测”两部分功能。
+
+## 6.1 数据集检查
+
+数据集检查脚本为 `scripts/check_dataset.py`，用于检查 `evaluate/input` 下评测集的完整性和标注质量。
+
+主要功能：
+
 - 检查图片和标注是否一一对应
 - 检查图片是否损坏
 - 检查标注类别 ID 是否越界
-- 统计小目标比例，小目标定义为标注框 `w < 32` 且 `h < 32` 像素
-
-核心函数：
-
-- `check_dataset(input_dir="evaluate/input")`
-
-函数调用返回：
-
-- 返回结构化字典，包含基础统计结果
-- 返回 `histogram_data`，供上层自行绘制“每类图片数”和“每类检测框数”直方图
+- 统计各类别图片数量、各类别检测框数量、总图片数、总框数、平均每图框数
+- 统计小目标比例
+- 兼容 `txt` 与 `xml` 标注；若同名 `txt` 不存在，会自动尝试同名 `xml`
 
 命令行用法：
 
@@ -392,27 +269,24 @@ py scripts/check_dataset.py --input evaluate/input
 - 将结果保存到 `temp/`
 - 使用 `opencv` 弹出两张直方图窗口
 
-命令行输出文件：
+输出文件：
 
 - `temp/check_dataset_summary.json`
 - `temp/check_dataset_report.txt`
 - `temp/check_dataset_per_class_images.png`
 - `temp/check_dataset_per_class_boxes.png`
 
-### 4. `scripts/evaluate_dataset.py`
+## 6.2 模型评测
 
-作用：
+模型评测脚本为 `scripts/evaluate_dataset.py`，用于使用 ONNX 模型对整个评测集执行检测评测。
 
-- 使用 ONNX 模型对整个评测集执行检测评测
+主要功能：
+
 - 支持读取 `txt` 标注；若同名 `txt` 不存在，会自动尝试 Pascal VOC `xml`
 - 按图像统计预测结果、TP、FP、FN
 - 计算整体 `Precision`、`Recall`、`mAP50`、误检率、漏检率
 - 输出每个类别的 `AP50 / Precision / Recall`
 - 保存评测可视化结果，便于排查误检和漏检
-
-核心函数：
-
-- `evaluate_dataset(model_path, input_dir="evaluate/input", output_dir="evaluate/output", conf_threshold=0.25, iou_threshold=0.5, classes_path=None)`
 
 命令行用法：
 
@@ -420,7 +294,7 @@ py scripts/check_dataset.py --input evaluate/input
 py scripts/evaluate_dataset.py --onnx best.onnx
 ```
 
-常用可选参数：
+常用参数：
 
 - `--input evaluate/input`：评测集目录
 - `--output evaluate/output`：评测输出目录
@@ -447,98 +321,89 @@ py scripts/evaluate_dataset.py --onnx best.onnx --input evaluate/input --output 
 - `evaluate/output/visualizations/`：所有图像的可视化结果
 - `evaluate/output/errors/`：存在误检或漏检的图像可视化结果
 
-### 5. `scripts/predict_video.py`
+# 7.可视化界面使用方法
 
-作用：
+GUI 主程序入口为 `main.py`。
 
-- 对一段交通标志牌视频执行逐帧检测
-- 将检测框、类别名称、置信度绘制到视频帧上
-- 在显示窗口中实时叠加 FPS
-- 导出带检测结果的输出视频
-
-核心函数：
-
-- `iter_video_predictions(model, video_path, conf_threshold=0.25, classes_path=None)`
-- `predict_video(model_path, video_path="evaluate/input_video", output_path="evaluate/output_video", conf_threshold=0.25, classes_path=None, show=True)`
-- `render_detections(frame, detections, class_names=None, fps=None)`
-
-说明：
-
-- CLI 模式下可直接读取一个视频并保存结果
-- 函数层已经拆成“逐帧结果生成 + 渲染”两层，后续 GUI 页面可以直接复用 `iter_video_predictions(...)` 获取每一帧的原图、检测结果、渲染结果和 FPS
-- 另外提供 `VideoPredictionSession`，支持 `seek_frame(...)` 和 `seek_time(...)`，便于后续 GUI 实现播放进度条拖动和跳转
-
-命令行用法：
+启动方式：
 
 ```powershell
-py scripts/predict_video.py --onnx models/best.onnx
+python main.py
 ```
 
-常用可选参数：
+GUI 当前已实现三个主功能：
 
-- `--input evaluate/input_video`：输入视频路径，或包含单个视频的目录
-- `--output evaluate/output_video`：输出视频路径，或输出目录
-- `--classes evaluate/input/classes.txt`：可选类别名文件
-- `--conf 0.25`：置信度阈值
-- `--no-show`：只保存输出视频，不弹实时显示窗口
+- 单图预测
+- 视频预测
+- 模型评估
 
-示例：
-
-```powershell
-py scripts/predict_video.py --onnx models/best.onnx --input evaluate/input_video/demo.mp4 --output evaluate/output_video --conf 0.25
-```
-
-命令行输出：
-
-- 终端打印输入视频、输出视频、分辨率、输入 FPS、总帧数、已处理帧数、平均推理 FPS
-- 默认弹出实时检测窗口，按 `q` 或 `Esc` 可提前结束
-
-输出文件：
-
-- 默认输出到 `evaluate/output_video/<输入视频名>_pred.mp4`
-
-## GUI 说明
-
-### 模型加载
+## 7.1 模型加载
 
 - 支持直接加载 `.onnx`
-- 支持选择 `.pt`，GUI 会先调用转换脚本
-- `.pt` 转换结果会先输出到 `temp/`，再重命名后移动到 `models/` 目录
+- 支持选择 `.pt`，GUI 会先调用转换逻辑，再加载运行时 ONNX 模型
+- GUI 会扫描 `models/` 目录下的 `.onnx` 和 `.pt` 文件
 
-### 单图预测
+## 7.2 单图预测
 
-- 选择图片后会立即加载到左右两个预览框
+- 选择图片后可在界面中查看原图与预测结果
 - 支持显示基准框、显示预测框
 - 支持滚轮缩放、按钮缩放、鼠标拖拽平移
+- 可调整置信度阈值后执行预测
 
-### 视频预测
+## 7.3 视频预测
 
 - 支持加载视频、播放 / 暂停、拖动进度条
 - 可切换“播放时启用预测”
 - 支持导出预测后视频到 `evaluate/output_video/`
+- 界面中可查看当前帧、检测数量和 FPS
 
-### 模型评估
+## 7.4 模型评估
 
 - “检查数据集”会输出数据集质量报告
 - “开始评估”会输出 Precision、Recall、mAP50、误检率、漏检率等摘要
 - 评估结果默认保存到 `evaluate/output/records/summary.json` 与 `evaluate/output/records/per_image_results.json`
 
-## 日志
+## 7.5 运行日志
 
 - GUI 运行时日志默认写入 `temp/gui_runtime.log`
-- 如果出现“模型评估后再单图预测崩溃”等问题，可以优先查看这个日志文件
-
-## 开发建议
-
-- GUI 主入口统一从 `main.py` 启动
-- 如果后续接入模型，可新增顶层 `core/`、`gui/pages/` 等普通模块目录
-- 如果后续需要打包成 `exe`，再补充 PyInstaller 配置即可
-- `tests/` 先保留最小结构，后续加功能时可以同步补测试
-
-
-# 7.可视化界面使用方法
+- 如果出现运行异常，可优先查看该日志文件
 
 # 8.ONNX转换与推理方法
+
+## 8.1 PT 转 ONNX
+
+模型转换脚本为 `scripts/model_convert.py`，用于将 YOLO 的 `.pt` 模型导出为 `.onnx`。
+
+命令行用法：
+
+```powershell
+py scripts/model_convert.py --pt best.pt --onnx best.onnx
+```
+
+常用参数：
+
+- `--imgsz 640`：输入尺寸，传 1 个值表示正方形，传 2 个值表示高和宽
+- `--opset 12`：指定 ONNX opset 版本
+- `--dynamic`：导出动态输入尺寸模型
+- `--simplify`：简化导出的 ONNX 图
+- `--half`：导出为 FP16 精度
+
+示例：
+
+```powershell
+py scripts/model_convert.py --pt best.pt --onnx best.onnx --imgsz 640 --opset 12 --dynamic --simplify
+```
+
+命令行输出：
+
+- 终端打印导出的 ONNX 文件路径
+
+## 8.2 ONNX 推理说明
+
+- `scripts/predict.py`、`scripts/predict_video.py` 和 `scripts/evaluate_dataset.py` 都基于 ONNX Runtime 执行推理
+- 安装包名称为 `onnxruntime-directml`，代码中的导入名仍然是 `onnxruntime`
+- 推理后端会按 `DmlExecutionProvider`、`CUDAExecutionProvider`、`CPUExecutionProvider` 的优先级自动选择可用 provider
+- GUI 加载 `.pt` 模型时，也会先转换为 `.onnx`，再进入后续推理流程
 
 # 9.项目成员分工
 
