@@ -4,19 +4,33 @@
 
 这个仓库目前采用“脚本优先”的轻量结构，适合在 Windows 上直接运行主程序和工具脚本。
 
+当前 GUI 已实现三个主功能：
+
+- 单图预测
+- 视频预测
+- 模型评估
+
 ## 目录结构
 
 ```text
 yolo26-gui/
+├─ evaluate/
+│  ├─ input/
+│  ├─ input_video/
+│  ├─ output/
+│  └─ output_video/
 ├─ gui/
 │  ├─ __init__.py
+│  ├─ backend_worker.py
 │  └─ main_window.py
+├─ models/
 ├─ scripts/
 │  ├─ model_convert.py
 │  ├─ predict.py
 │  ├─ check_dataset.py
 │  ├─ evaluate_dataset.py
 │  └─ predict_video.py
+├─ temp/
 ├─ test_scripts/
 │  └─ run_predict_visualize.py
 ├─ tests/
@@ -36,6 +50,13 @@ yolo26-gui/
 ```powershell
 py main.py
 ```
+
+GUI 启动后可直接使用：
+
+- 顶部模型菜单加载 `.onnx` 或 `.pt` 模型
+- 单图预测页选择图片并查看 GT / 预测框
+- 视频预测页加载视频、播放、导出预测视频
+- 模型评估页执行数据集检查和评测
 
 如果你希望先安装依赖，再运行主程序：
 
@@ -65,6 +86,7 @@ py main.py
 - `evaluate_dataset.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
 - `predict_video.py` 依赖 `onnxruntime-directml`、`opencv-python`、`numpy`
 - `onnxruntime-directml` 安装后，代码中的导入名仍然是 `onnxruntime`
+- `PySide6` 用于 GUI
 
 ### 安装命令
 
@@ -89,6 +111,7 @@ py -m pip install -r requirements-dev.txt
 
 - 将 YOLO 的 `.pt` 模型导出为 `.onnx`
 - 适合把训练结果转换成后续 GUI、推理脚本、评测脚本可直接使用的 ONNX 模型
+- 当前实现会先在 `temp/model_convert/` 下生成临时导出文件，再移动到目标位置，避免覆盖现有 `models/*.onnx`
 
 核心函数：
 
@@ -159,6 +182,7 @@ py scripts/predict.py --onnx best.onnx --image test.jpg --conf 0.25
 作用：
 
 - 检查 `evaluate/input` 下的 YOLO 格式评测集是否完整、可用
+- 兼容 `txt` 与 `xml` 标注；若同名 `txt` 不存在，会自动尝试同名 `xml`
 - 统计各类别图片数量、各类别检测框数量、总图片数、总框数、平均每图框数
 - 检查图片和标注是否一一对应
 - 检查图片是否损坏
@@ -198,6 +222,7 @@ py scripts/check_dataset.py --input evaluate/input
 作用：
 
 - 使用 ONNX 模型对整个评测集执行检测评测
+- 支持读取 `txt` 标注；若同名 `txt` 不存在，会自动尝试 Pascal VOC `xml`
 - 按图像统计预测结果、TP、FP、FN
 - 计算整体 `Precision`、`Recall`、`mAP50`、误检率、漏检率
 - 输出每个类别的 `AP50 / Precision / Recall`
@@ -264,7 +289,7 @@ py scripts/evaluate_dataset.py --onnx best.onnx --input evaluate/input --output 
 命令行用法：
 
 ```powershell
-py scripts/predict_video.py --onnx temp/yolo26n.onnx
+py scripts/predict_video.py --onnx models/best.onnx
 ```
 
 常用可选参数：
@@ -278,7 +303,7 @@ py scripts/predict_video.py --onnx temp/yolo26n.onnx
 示例：
 
 ```powershell
-py scripts/predict_video.py --onnx temp/yolo26n.onnx --input evaluate/input_video/demo.mp4 --output evaluate/output_video --conf 0.25
+py scripts/predict_video.py --onnx models/best.onnx --input evaluate/input_video/demo.mp4 --output evaluate/output_video --conf 0.25
 ```
 
 命令行输出：
@@ -289,6 +314,37 @@ py scripts/predict_video.py --onnx temp/yolo26n.onnx --input evaluate/input_vide
 输出文件：
 
 - 默认输出到 `evaluate/output_video/<输入视频名>_pred.mp4`
+
+## GUI 说明
+
+### 模型加载
+
+- 支持直接加载 `.onnx`
+- 支持选择 `.pt`，GUI 会先调用转换脚本
+- `.pt` 转换结果会先输出到 `temp/`，再重命名后移动到 `models/` 目录
+
+### 单图预测
+
+- 选择图片后会立即加载到左右两个预览框
+- 支持显示基准框、显示预测框
+- 支持滚轮缩放、按钮缩放、鼠标拖拽平移
+
+### 视频预测
+
+- 支持加载视频、播放 / 暂停、拖动进度条
+- 可切换“播放时启用预测”
+- 支持导出预测后视频到 `evaluate/output_video/`
+
+### 模型评估
+
+- “检查数据集”会输出数据集质量报告
+- “开始评估”会输出 Precision、Recall、mAP50、误检率、漏检率等摘要
+- 评估结果默认保存到 `evaluate/output/records/summary.json` 与 `evaluate/output/records/per_image_results.json`
+
+## 日志
+
+- GUI 运行时日志默认写入 `temp/gui_runtime.log`
+- 如果出现“模型评估后再单图预测崩溃”等问题，可以优先查看这个日志文件
 
 ## 开发建议
 
