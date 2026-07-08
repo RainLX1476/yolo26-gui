@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +58,13 @@ def _ensure_dir(path: Path) -> Path:
 	return path
 
 
+def _reset_output_dir(path: Path) -> Path:
+	if path.exists():
+		shutil.rmtree(path)
+	path.mkdir(parents=True, exist_ok=True)
+	return path
+
+
 def _discover_images(input_dir: Path) -> list[Path]:
 	return sorted(
 		path
@@ -90,6 +99,9 @@ def _find_label_path(image_path: Path, input_dir: Path) -> Path:
 		seen.add(txt_candidate)
 		if txt_candidate.exists():
 			return txt_candidate
+		xml_candidate = candidate.with_suffix(".xml")
+		if xml_candidate.exists():
+			return xml_candidate
 	return image_path.with_suffix(".txt")
 
 
@@ -154,10 +166,65 @@ def _parse_label_line(parts: list[str], image_width: int, image_height: int) -> 
 	return ObjectAnnotation(class_id=class_id, box=[x1, y1, x2, y2])
 
 
-def _load_ground_truths(label_path: Path, image_shape: tuple[int, int]) -> list[ObjectAnnotation]:
+def _resolve_xml_class_id(
+	class_name: str,
+	class_names: dict[int, str],
+) -> int:
+	reverse_class_names = {name: class_id for class_id, name in class_names.items()}
+	if class_name in reverse_class_names:
+		return int(reverse_class_names[class_name])
+	try:
+		return int(float(class_name))
+	except ValueError as exc:
+		raise ValueError(f"XML 标注类别 `{class_name}` 未在类别表中定义") from exc
+
+
+def _load_xml_ground_truths(
+	label_path: Path,
+	image_shape: tuple[int, int],
+	class_names: dict[int, str] | None = None,
+) -> list[ObjectAnnotation]:
+	image_height, image_width = image_shape
+	class_names = class_names or {}
+	root = ET.fromstring(label_path.read_text(encoding="utf-8"))
+
+	annotations: list[ObjectAnnotation] = []
+	for obj in root.findall("object"):
+		class_name = (obj.findtext("name") or "").strip()
+		bndbox = obj.find("bndbox")
+		if not class_name or bndbox is None:
+			continue
+
+		x1 = float(bndbox.findtext("xmin", "0"))
+		y1 = float(bndbox.findtext("ymin", "0"))
+		x2 = float(bndbox.findtext("xmax", "0"))
+		y2 = float(bndbox.findtext("ymax", "0"))
+
+		x1 = float(np.clip(x1, 0, image_width))
+		y1 = float(np.clip(y1, 0, image_height))
+		x2 = float(np.clip(x2, 0, image_width))
+		y2 = float(np.clip(y2, 0, image_height))
+
+		annotations.append(
+			ObjectAnnotation(
+				class_id=_resolve_xml_class_id(class_name, class_names),
+				box=[x1, y1, x2, y2],
+			)
+		)
+	return annotations
+
+
+def _load_ground_truths(
+	label_path: Path,
+	image_shape: tuple[int, int],
+	class_names: dict[int, str] | None = None,
+) -> list[ObjectAnnotation]:
 	image_height, image_width = image_shape
 	if not label_path.exists():
 		return []
+
+	if label_path.suffix.lower() == ".xml":
+		return _load_xml_ground_truths(label_path, image_shape, class_names)
 
 	annotations: list[ObjectAnnotation] = []
 	for raw_line in label_path.read_text(encoding="utf-8").splitlines():
@@ -286,22 +353,27 @@ def _save_visualization(
 	predictions: list[dict[str, Any]],
 	class_names: dict[int, str],
 	output_path: Path,
+	*,
+	draw_ground_truths: bool = True,
+	draw_predictions: bool = True,
 ) -> None:
 	canvas = image.copy()
-	for gt in ground_truths:
-		_draw_box(
-			canvas,
-			gt.box,
-			f"GT {_class_name(gt.class_id, class_names)}",
-			(0, 200, 0),
-		)
-	for prediction in predictions:
-		_draw_box(
-			canvas,
-			list(map(float, prediction["box"])),
-			f"Pred {_class_name(int(prediction['class_id']), class_names)} {float(prediction['confidence']):.2f}",
-			(0, 0, 255),
-		)
+	if draw_ground_truths:
+		for gt in ground_truths:
+			_draw_box(
+				canvas,
+				gt.box,
+				f"GT {_class_name(gt.class_id, class_names)}",
+				(0, 200, 0),
+			)
+	if draw_predictions:
+		for prediction in predictions:
+			_draw_box(
+				canvas,
+				list(map(float, prediction["box"])),
+				f"Pred {_class_name(int(prediction['class_id']), class_names)} {float(prediction['confidence']):.2f}",
+				(0, 0, 255),
+			)
 	_ensure_dir(output_path.parent)
 	cv2.imwrite(str(output_path), canvas)
 
@@ -314,6 +386,49 @@ def _build_output_image_path(root_dir: Path, image_path: Path, input_root: Path)
 	return root_dir / relative_path
 
 
+def _save_visualization_pair(
+	image: np.ndarray,
+	ground_truths: list[ObjectAnnotation],
+	predictions: list[dict[str, Any]],
+	class_names: dict[int, str],
+	combined_output_path: Path,
+	prediction_output_path: Path,
+	ground_truth_output_path: Path,
+) -> tuple[str, str, str]:
+	_save_visualization(
+		image=image,
+		ground_truths=ground_truths,
+		predictions=predictions,
+		class_names=class_names,
+		output_path=combined_output_path,
+		draw_ground_truths=True,
+		draw_predictions=True,
+	)
+	_save_visualization(
+		image=image,
+		ground_truths=ground_truths,
+		predictions=predictions,
+		class_names=class_names,
+		output_path=prediction_output_path,
+		draw_ground_truths=False,
+		draw_predictions=True,
+	)
+	_save_visualization(
+		image=image,
+		ground_truths=ground_truths,
+		predictions=predictions,
+		class_names=class_names,
+		output_path=ground_truth_output_path,
+		draw_ground_truths=True,
+		draw_predictions=False,
+	)
+	return (
+		str(combined_output_path),
+		str(prediction_output_path),
+		str(ground_truth_output_path),
+	)
+
+
 def evaluate_dataset(
 	model_path: str | Path,
 	input_dir: str | Path = "evaluate/input",
@@ -324,8 +439,20 @@ def evaluate_dataset(
 ) -> dict[str, Any]:
 	input_root = Path(input_dir).expanduser().resolve()
 	output_root = Path(output_dir).expanduser().resolve()
+	_reset_output_dir(output_root)
 	visual_dir = _ensure_dir(output_root / "visualizations")
+	visual_combined_dir = _ensure_dir(visual_dir / "combined")
+	visual_pred_dir = _ensure_dir(visual_dir / "predictions_only")
+	visual_gt_dir = _ensure_dir(visual_dir / "ground_truths_only")
 	error_dir = _ensure_dir(output_root / "errors")
+	false_positive_dir = _ensure_dir(error_dir / "false_positives")
+	false_positive_combined_dir = _ensure_dir(false_positive_dir / "combined")
+	false_positive_pred_dir = _ensure_dir(false_positive_dir / "predictions_only")
+	false_positive_gt_dir = _ensure_dir(false_positive_dir / "ground_truths_only")
+	false_negative_dir = _ensure_dir(error_dir / "false_negatives")
+	false_negative_combined_dir = _ensure_dir(false_negative_dir / "combined")
+	false_negative_pred_dir = _ensure_dir(false_negative_dir / "predictions_only")
+	false_negative_gt_dir = _ensure_dir(false_negative_dir / "ground_truths_only")
 	record_dir = _ensure_dir(output_root / "records")
 
 	if not input_root.exists():
@@ -354,7 +481,7 @@ def evaluate_dataset(
 			raise FileNotFoundError(f"无法读取图像文件: {image_path}")
 
 		label_path = _find_label_path(image_path, input_root)
-		ground_truths = _load_ground_truths(label_path, image.shape[:2])
+		ground_truths = _load_ground_truths(label_path, image.shape[:2], class_names)
 		for gt in ground_truths:
 			gt_count_by_class[gt.class_id] += 1
 
@@ -382,34 +509,118 @@ def evaluate_dataset(
 			total_fn += 1
 			fn_count_by_class[fn_class_id] += 1
 
-		is_error_image = bool(false_positive_indices or false_negative_indices)
-		output_image_path = _build_output_image_path(visual_dir, image_path, input_root)
-		_save_visualization(
-			image=image,
-			ground_truths=ground_truths,
-			predictions=predictions,
-			class_names=class_names,
-			output_path=output_image_path,
-		)
-		if is_error_image:
-			_save_visualization(
+		has_false_positive = bool(false_positive_indices)
+		has_false_negative = bool(false_negative_indices)
+		is_error_image = has_false_positive or has_false_negative
+
+		visualization_combined_path: str | None = None
+		visualization_prediction_path: str | None = None
+		visualization_ground_truth_path: str | None = None
+		false_positive_combined_path: str | None = None
+		false_positive_prediction_path: str | None = None
+		false_positive_ground_truth_path: str | None = None
+		false_negative_combined_path: str | None = None
+		false_negative_prediction_path: str | None = None
+		false_negative_ground_truth_path: str | None = None
+
+		if not is_error_image:
+			(
+				visualization_combined_path,
+				visualization_prediction_path,
+				visualization_ground_truth_path,
+			) = _save_visualization_pair(
 				image=image,
 				ground_truths=ground_truths,
 				predictions=predictions,
 				class_names=class_names,
-				output_path=_build_output_image_path(error_dir, image_path, input_root),
+				combined_output_path=_build_output_image_path(
+					visual_combined_dir,
+					image_path,
+					input_root,
+				),
+				prediction_output_path=_build_output_image_path(
+					visual_pred_dir,
+					image_path,
+					input_root,
+				),
+				ground_truth_output_path=_build_output_image_path(
+					visual_gt_dir,
+					image_path,
+					input_root,
+				),
+			)
+
+		if has_false_positive:
+			(
+				false_positive_combined_path,
+				false_positive_prediction_path,
+				false_positive_ground_truth_path,
+			) = _save_visualization_pair(
+				image=image,
+				ground_truths=ground_truths,
+				predictions=predictions,
+				class_names=class_names,
+				combined_output_path=_build_output_image_path(
+					false_positive_combined_dir,
+					image_path,
+					input_root,
+				),
+				prediction_output_path=_build_output_image_path(
+					false_positive_pred_dir,
+					image_path,
+					input_root,
+				),
+				ground_truth_output_path=_build_output_image_path(
+					false_positive_gt_dir,
+					image_path,
+					input_root,
+				),
+			)
+
+		if has_false_negative:
+			(
+				false_negative_combined_path,
+				false_negative_prediction_path,
+				false_negative_ground_truth_path,
+			) = _save_visualization_pair(
+				image=image,
+				ground_truths=ground_truths,
+				predictions=predictions,
+				class_names=class_names,
+				combined_output_path=_build_output_image_path(
+					false_negative_combined_dir,
+					image_path,
+					input_root,
+				),
+				prediction_output_path=_build_output_image_path(
+					false_negative_pred_dir,
+					image_path,
+					input_root,
+				),
+				ground_truth_output_path=_build_output_image_path(
+					false_negative_gt_dir,
+					image_path,
+					input_root,
+				),
 			)
 
 		per_image_records.append(
 			{
 				"image_path": str(image_path),
 				"label_path": str(label_path),
-				"visualization_path": str(output_image_path),
-				"error_visualization_path": (
-					str(_build_output_image_path(error_dir, image_path, input_root))
-					if is_error_image
-					else None
-				),
+				"visualization_path": visualization_combined_path,
+				"error_visualization_path": None,
+				"visualization_combined_path": visualization_combined_path,
+				"visualization_prediction_path": visualization_prediction_path,
+				"visualization_ground_truth_path": visualization_ground_truth_path,
+				"false_positive_visualization_path": false_positive_combined_path,
+				"false_negative_visualization_path": false_negative_combined_path,
+				"false_positive_combined_path": false_positive_combined_path,
+				"false_positive_prediction_path": false_positive_prediction_path,
+				"false_positive_ground_truth_path": false_positive_ground_truth_path,
+				"false_negative_combined_path": false_negative_combined_path,
+				"false_negative_prediction_path": false_negative_prediction_path,
+				"false_negative_ground_truth_path": false_negative_ground_truth_path,
 				"prediction_count": len(predictions),
 				"ground_truth_count": len(ground_truths),
 				"true_positive_count": sum(
@@ -417,6 +628,8 @@ def evaluate_dataset(
 				),
 				"false_positive_count": len(false_positive_indices),
 				"false_negative_count": len(false_negative_indices),
+				"has_false_positive": has_false_positive,
+				"has_false_negative": has_false_negative,
 				"is_error_image": is_error_image,
 				"ground_truths": [
 					{

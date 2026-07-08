@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import tempfile
 from pathlib import Path
 
 from ultralytics import YOLO
@@ -33,25 +35,34 @@ def convert_pt_to_onnx(
 	"""
 	pt_file = Path(pt_path).expanduser().resolve()
 	output_path = Path(onnx_path).expanduser().resolve() if onnx_path else None
+	temp_root = Path(__file__).resolve().parents[1] / "temp" / "model_convert"
+	temp_root.mkdir(parents=True, exist_ok=True)
 
-	model = YOLO(str(pt_file))
-	exported_path = Path(
-		model.export(
-			format="onnx",
-			imgsz=imgsz,
-			opset=opset,
-			dynamic=dynamic,
-			simplify=simplify,
-			half=half,
-		)
-	).resolve()
+	with tempfile.TemporaryDirectory(dir=temp_root, prefix=f"{pt_file.stem}_") as temp_dir_name:
+		temp_dir = Path(temp_dir_name)
+		temp_pt_path = temp_dir / pt_file.name
+		shutil.copy2(pt_file, temp_pt_path)
 
-	if output_path and exported_path != output_path:
-		output_path.parent.mkdir(parents=True, exist_ok=True)
-		exported_path.replace(output_path)
-		return output_path
+		model = YOLO(str(temp_pt_path))
+		exported_path = Path(
+			model.export(
+				format="onnx",
+				imgsz=imgsz,
+				opset=opset,
+				dynamic=dynamic,
+				simplify=simplify,
+				half=half,
+			)
+		).resolve()
 
-	return exported_path
+		if output_path:
+			output_path.parent.mkdir(parents=True, exist_ok=True)
+			shutil.move(str(exported_path), str(output_path))
+			return output_path
+
+		final_path = pt_file.with_suffix(".onnx")
+		shutil.move(str(exported_path), str(final_path))
+		return final_path.resolve()
 
 
 def _parse_args() -> argparse.Namespace:

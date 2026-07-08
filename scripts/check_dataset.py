@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import struct
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,12 @@ def _discover_files(input_dir: Path) -> tuple[list[Path], list[Path]]:
 	)
 	label_paths = sorted(
 		path
-		for path in input_dir.rglob("*.txt")
-		if path.is_file() and path.name != "classes.txt"
+		for path in input_dir.rglob("*")
+		if path.is_file()
+		and (
+			(path.suffix.lower() == ".txt" and path.name != "classes.txt")
+			or path.suffix.lower() == ".xml"
+		)
 	)
 	return image_paths, label_paths
 
@@ -211,6 +216,72 @@ def _parse_label_file(
 				"class_id": class_id,
 				"width_px": abs(box_width * image_width),
 				"height_px": abs(box_height * image_height),
+			}
+		)
+
+	return {
+		"records": records,
+		"out_of_range_ids": out_of_range_ids,
+		"invalid_lines": invalid_lines,
+	}
+
+
+def _parse_xml_label_file(
+	label_path: Path,
+	image_width: int,
+	image_height: int,
+	class_names: list[str],
+	num_classes: int,
+) -> dict[str, Any]:
+	records: list[dict[str, Any]] = []
+	out_of_range_ids: list[int] = []
+	invalid_lines: list[dict[str, Any]] = []
+	reverse_class_names = {name: index for index, name in enumerate(class_names)}
+
+	root = ET.fromstring(label_path.read_text(encoding="utf-8"))
+	for object_index, obj in enumerate(root.findall("object"), start=1):
+		class_name = (obj.findtext("name") or "").strip()
+		bndbox = obj.find("bndbox")
+		if not class_name or bndbox is None:
+			invalid_lines.append(
+				{
+					"line_number": object_index,
+					"content": class_name or "<empty>",
+					"reason": "XML object 缺少 name 或 bndbox",
+				}
+			)
+			continue
+
+		try:
+			class_id = reverse_class_names[class_name]
+		except KeyError:
+			try:
+				class_id = int(float(class_name))
+			except ValueError:
+				invalid_lines.append(
+					{
+						"line_number": object_index,
+						"content": class_name,
+						"reason": "XML 类别名未在 classes.txt 中定义",
+					}
+				)
+				continue
+
+		if num_classes > 0 and not 0 <= class_id < num_classes:
+			out_of_range_ids.append(class_id)
+
+		xmin = float(bndbox.findtext("xmin", "0"))
+		ymin = float(bndbox.findtext("ymin", "0"))
+		xmax = float(bndbox.findtext("xmax", "0"))
+		ymax = float(bndbox.findtext("ymax", "0"))
+		box_width = abs(np.clip(xmax, 0, image_width) - np.clip(xmin, 0, image_width))
+		box_height = abs(np.clip(ymax, 0, image_height) - np.clip(ymin, 0, image_height))
+
+		records.append(
+			{
+				"class_id": class_id,
+				"width_px": float(box_width),
+				"height_px": float(box_height),
 			}
 		)
 
@@ -514,7 +585,16 @@ def check_dataset(input_dir: str | Path = "evaluate/input") -> dict[str, Any]:
 		if label_path is None:
 			continue
 
-		parsed = _parse_label_file(label_path, image_width, image_height, len(class_names))
+		if label_path.suffix.lower() == ".xml":
+			parsed = _parse_xml_label_file(
+				label_path,
+				image_width,
+				image_height,
+				class_names,
+				len(class_names),
+			)
+		else:
+			parsed = _parse_label_file(label_path, image_width, image_height, len(class_names))
 		records = parsed["records"]
 		invalid_ids = parsed["out_of_range_ids"]
 		invalid_lines = parsed["invalid_lines"]
